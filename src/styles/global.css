@@ -580,12 +580,56 @@ code {
   }
 }
 
+/* ----- Auth card (Bank loan CTA) ----- */
+.auth-card__head {
+  text-align: center;
+  margin-bottom: 1.5rem;
+}
+.auth-card__head .muted {
+  max-width: 46ch;
+  margin-inline: auto;
+}
+.auth-card__features {
+  list-style: none;
+  padding: 1rem 1.25rem;
+  margin: 0 0 1.5rem;
+  background: var(--c-surface-2);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-md);
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  color: var(--c-text-muted);
+}
+.auth-card__features li {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.auth-card__features span {
+  color: var(--c-success);
+  font-weight: 700;
+}
+.auth-card__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  text-align: center;
+}
+.btn__icon {
+  display: inline-grid;
+  place-items: center;
+}
+
 /* ----- Verify page ----- */
 .verify-grid {
   display: grid;
   grid-template-columns: auto 1fr;
   gap: 2rem;
   align-items: start;
+}
+.verify-grid--centered {
+  align-items: center;
 }
 .verify-qr {
   display: flex;

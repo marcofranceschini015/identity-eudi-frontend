@@ -3,36 +3,40 @@ import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { QRCodeCanvas } from 'qrcode.react';
 import ErrorBox from '../components/ErrorBox';
 import Spinner from '../components/Spinner';
-import { pollSession, ApiError } from '../api/sessionClient';
+import { pollPresentation } from '../api/presentationClient';
+import { ApiError } from '../api/http';
 import { POLL_INTERVAL_MS } from '../config';
-import type { SessionState } from '../api/types';
+import type { PresentationState } from '../api/types';
 
 interface LocationState {
-  sessionId: string;
-  redirectUrl: string;
-  oneTimePassword: string;
-  tenant: string;
+  presentationSessionId: string;
+  presentationRequestUri: string;
 }
 
 function isLocationState(v: unknown): v is LocationState {
   if (!v || typeof v !== 'object') return false;
   const o = v as Record<string, unknown>;
   return (
-    typeof o.sessionId === 'string' &&
-    typeof o.redirectUrl === 'string' &&
-    typeof o.oneTimePassword === 'string' &&
-    typeof o.tenant === 'string'
+    typeof o.presentationSessionId === 'string' &&
+    typeof o.presentationRequestUri === 'string'
   );
 }
+
+const STATUS_LABEL: Record<PresentationState, string> = {
+  CREATED: 'Waiting for your wallet to scan…',
+  PENDING: 'Wallet connected — confirm the request to continue…',
+  COMPLETE: 'Authentication complete.',
+  FAILED: 'Authentication failed.',
+  EXPIRED: 'The request has expired.',
+};
 
 export default function VerifyPage() {
   const location = useLocation();
   const navigate = useNavigate();
   const state = isLocationState(location.state) ? location.state : null;
 
-  const [currentState, setCurrentState] = useState<SessionState>('CREATED');
+  const [currentState, setCurrentState] = useState<PresentationState>('CREATED');
   const [pollError, setPollError] = useState<string | null>(null);
-  const [otpCopied, setOtpCopied] = useState(false);
   const stoppedRef = useRef(false);
 
   useEffect(() => {
@@ -43,24 +47,24 @@ export default function VerifyPage() {
     const tick = async () => {
       if (stoppedRef.current) return;
       try {
-        const res = await pollSession(state.sessionId);
+        const res = await pollPresentation(state.presentationSessionId);
         if (stoppedRef.current) return;
         setCurrentState(res.state);
         setPollError(null);
 
-        if (res.state === 'ISSUED') {
+        if (res.state === 'COMPLETE') {
           stoppedRef.current = true;
           navigate('/bank-loan/success', { replace: true });
           return;
         }
-        if (res.state === 'FAILED' || res.state === 'REVOKED') {
+        if (res.state === 'FAILED' || res.state === 'EXPIRED') {
           stoppedRef.current = true;
           return;
         }
       } catch (err) {
         if (stoppedRef.current) return;
         const message =
-          err instanceof ApiError ? err.message : 'Could not reach the verification service.';
+          err instanceof ApiError ? err.message : 'Could not reach the authentication service.';
         setPollError(message);
       }
       timeoutId = window.setTimeout(tick, POLL_INTERVAL_MS);
@@ -77,50 +81,43 @@ export default function VerifyPage() {
     return <Navigate to="/bank-loan" replace />;
   }
 
-  const terminalError = currentState === 'FAILED' || currentState === 'REVOKED';
-
-  async function copyOtp() {
-    if (!state) return;
-    try {
-      await navigator.clipboard.writeText(state.oneTimePassword);
-      setOtpCopied(true);
-      window.setTimeout(() => setOtpCopied(false), 1500);
-    } catch {
-      // ignore
-    }
-  }
+  const terminalError = currentState === 'FAILED' || currentState === 'EXPIRED';
 
   return (
     <section className="container narrow">
-      <Link to="/bank-loan" className="back-link">← Edit details</Link>
+      <Link to="/bank-loan" className="back-link">← Cancel</Link>
 
       <div className="verify-card">
         <header className="verify-card__head">
-          <span className="eyebrow">Step 2 of 2 · Wallet verification</span>
+          <span className="eyebrow">Step 2 of 2 · Wallet authentication</span>
           <h1>Scan with your EUDI wallet</h1>
           <p className="muted">
-            Open your wallet app, scan the QR code, then confirm by entering the one-time code
-            shown below. We will detect the result automatically.
+            Open your wallet app and scan the QR code. Approve the request when prompted —
+            we will detect the result automatically.
           </p>
         </header>
 
         {terminalError ? (
           <ErrorBox
-            title={currentState === 'FAILED' ? 'Verification failed' : 'Credential revoked'}
+            title={
+              currentState === 'FAILED'
+                ? 'Authentication failed'
+                : 'Authentication request expired'
+            }
             message={
               currentState === 'FAILED'
-                ? 'The wallet reported a failed issuance. Please go back and try again.'
-                : 'The credential associated with this session has been revoked.'
+                ? 'The wallet reported a failed authentication. Please go back and try again.'
+                : 'The authentication request has expired. Please go back and start a new one.'
             }
             onRetry={() => navigate('/bank-loan', { replace: true })}
           />
         ) : (
-          <div className="verify-grid">
+          <div className="verify-grid verify-grid--centered">
             <div className="verify-qr">
               <div className="verify-qr__frame">
                 <QRCodeCanvas
-                  value={state.redirectUrl}
-                  size={232}
+                  value={state.presentationRequestUri}
+                  size={248}
                   level="M"
                   includeMargin={false}
                   bgColor="#ffffff"
@@ -129,7 +126,7 @@ export default function VerifyPage() {
               </div>
               <a
                 className="verify-qr__link"
-                href={state.redirectUrl}
+                href={state.presentationRequestUri}
                 target="_blank"
                 rel="noreferrer noopener"
               >
@@ -138,25 +135,11 @@ export default function VerifyPage() {
             </div>
 
             <div className="verify-side">
-              <div className="otp-card">
-                <span className="eyebrow">One-time code</span>
-                <div className="otp-card__digits" aria-label="One time password">
-                  {state.oneTimePassword.split('').map((d, i) => (
-                    <span className="otp-card__digit" key={`${d}-${i}`}>
-                      {d}
-                    </span>
-                  ))}
-                </div>
-                <button type="button" className="btn btn--ghost btn--sm" onClick={copyOtp}>
-                  {otpCopied ? 'Copied!' : 'Copy code'}
-                </button>
-              </div>
-
               <div className="status-card">
                 <div className="status-card__row">
                   <Spinner />
                   <div>
-                    <strong>Waiting for your wallet…</strong>
+                    <strong>{STATUS_LABEL[currentState]}</strong>
                     <p className="muted">
                       Current status: <code>{currentState}</code>
                     </p>
@@ -172,8 +155,8 @@ export default function VerifyPage() {
               <ol className="how-list">
                 <li>Open your EUDI-compatible wallet on your phone.</li>
                 <li>Scan the QR code on the left.</li>
-                <li>When prompted, enter the one-time code above.</li>
-                <li>Approve the credential issuance in the wallet.</li>
+                <li>Review what is being requested.</li>
+                <li>Approve the request to share your verified identity.</li>
               </ol>
             </div>
           </div>
